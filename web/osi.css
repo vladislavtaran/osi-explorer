@@ -93,6 +93,30 @@ html[data-theme="dark"] #run{background:var(--sig); color:#0c0c0b;}
 .chip{font-family:var(--mono); font-size:.72rem; color:var(--ink-2); border:1px solid var(--rule); padding:2px 8px; background:var(--paper);}
 .chip.on{border-color:var(--sig); color:var(--sig); font-weight:600;}
 
+/* recursive DNS trace */
+.trace{margin-top:6px; border:1px solid var(--rule); background:var(--paper);}
+.trow{display:grid; grid-template-columns:58px 168px 1fr; gap:10px; padding:7px 10px; font-family:var(--mono);
+  font-size:.76rem; border-bottom:1px solid var(--rule); align-items:baseline;}
+.trow:last-child{border-bottom:0;}
+.tlvl{color:var(--sig); text-transform:uppercase; font-size:.62rem; letter-spacing:.05em; font-weight:600;}
+.tsrv{color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.tarr{color:var(--mute); word-break:break-word;} .tarr b{color:var(--ink);}
+
+/* TLS handshake ladder */
+.ladder{margin-top:6px; border:1px solid var(--rule); background:var(--paper);}
+.lrow{display:grid; grid-template-columns:88px 1fr; gap:8px 12px; padding:7px 10px; font-family:var(--mono);
+  font-size:.78rem; border-bottom:1px solid var(--rule);}
+.lrow:last-child{border-bottom:0;}
+.lrow.l-s{background:rgba(127,127,127,.05);}
+.lfrom{color:var(--sig); font-weight:600; white-space:nowrap;}
+.lmsg{color:var(--ink); word-break:break-word;}
+.ldet{grid-column:2; color:var(--mute); font-size:.7rem;}
+.enc{color:var(--real);}
+@media (max-width:560px){
+  .trow{grid-template-columns:52px 1fr; }
+  .trow .tarr{grid-column:1 / -1;}
+}
+
 .foot{font-family:var(--mono); font-size:.72rem; color:var(--mute); margin-top:26px; text-align:center;}
 .foot a{color:var(--sig);} .foot a:hover{text-decoration:underline;}
 

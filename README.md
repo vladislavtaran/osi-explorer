@@ -15,9 +15,9 @@ plain-English explanation, and an honesty badge:
 
 | Layer | Shown | Source |
 |------|-------|--------|
-| **L7 Application** | DNS query (real bytes) + answers/TTL; HTTP request & response | 🟢 **real** |
+| **L7 Application** | DNS query + answers/TTL, the **recursive walk** (root → TLD → authoritative); HTTP request & response | 🟢 **real** |
 | **L6 Presentation** | TLS version, negotiated cipher, X.509 certificate | 🟢 **real** |
-| **L5 Session** | TLS handshake — SNI, ciphers **offered vs chosen** (the negotiation) | 🟢 **real** |
+| **L5 Session** | TLS handshake — SNI, ciphers **offered vs chosen**, and the **handshake ladder** (TLS 1.2 vs 1.3) | 🟢 **real** |
 | **L4 Transport** | TCP ports, 3-way handshake | 🟠 facts real, packet bytes **reconstructed** |
 | **L3 Network** | source/destination IP, TTL | 🟢 **real** |
 | **L2 Data Link** | MAC framing / first hop | ⚪ **illustrated** |

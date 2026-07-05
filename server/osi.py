@@ -145,6 +145,149 @@ def dns_query(host, qtype=1):
     }
 
 
+# ---------- L7 DNS: recursive walk (root -> TLD -> authoritative) ----------
+_RTYPE = {1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 28: "AAAA"}
+ROOTS = [("a.root-servers.net", "198.41.0.4"),
+         ("f.root-servers.net", "192.5.5.241"),
+         ("k.root-servers.net", "193.0.14.129")]
+
+
+def _parse_name(data, idx):
+    labels, jumped, start = [], False, idx
+    while True:
+        length = data[idx]
+        if length == 0:
+            idx += 1
+            break
+        if length & 0xC0 == 0xC0:                # compression pointer
+            ptr = ((length & 0x3F) << 8) | data[idx + 1]
+            if not jumped:
+                start = idx + 2
+            idx = ptr
+            jumped = True
+            continue
+        idx += 1
+        labels.append(data[idx:idx + length].decode("latin1"))
+        idx += length
+    return ".".join(labels), (start if jumped else idx)
+
+
+def _parse_rr(data, idx):
+    name, idx = _parse_name(data, idx)
+    rtype, rclass, ttl, rdlen = struct.unpack(">HHIH", data[idx:idx + 10])
+    idx += 10
+    val = None
+    if rtype == 1 and rdlen == 4:
+        val = socket.inet_ntoa(data[idx:idx + rdlen])
+    elif rtype == 28 and rdlen == 16:
+        val = socket.inet_ntop(socket.AF_INET6, data[idx:idx + rdlen])
+    elif rtype in (2, 5):                        # NS / CNAME
+        val, _ = _parse_name(data, idx)
+    idx += rdlen
+    return {"name": name, "type": _RTYPE.get(rtype, str(rtype)), "ttl": ttl, "data": val}, idx
+
+
+def _parse_msg(data):
+    _, flags, qd, an, ns, ar = struct.unpack(">HHHHHH", data[:12])
+    idx = 12
+    for _ in range(qd):
+        _, idx = _parse_name(data, idx)
+        idx += 4
+    def sect(n):
+        nonlocal idx
+        out = []
+        for _ in range(n):
+            rr, idx = _parse_rr(data, idx)
+            out.append(rr)
+        return out
+    return {"answers": sect(an), "authority": sect(ns), "additional": sect(ar)}
+
+
+def _query_server(server_ip, host, qtype=1, rd=0):
+    tid = random.randint(0, 0xFFFF)
+    header = struct.pack(">HHHHHH", tid, 0x0100 if rd else 0x0000, 1, 0, 0, 0)
+    packet = header + _encode_qname(host) + struct.pack(">HH", qtype, 1)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(3)
+    try:
+        s.sendto(packet, (server_ip, 53))
+        data, _ = s.recvfrom(4096)
+    finally:
+        s.close()
+    return _parse_msg(data)
+
+
+def dns_trace(host, qtype=1, max_hops=10):
+    """Iteratively resolve host starting from a root server; return each step."""
+    steps = []
+    name, ip, level = ROOTS[0][0], ROOTS[0][1], "root"
+    target = host
+    for _ in range(max_hops):
+        try:
+            msg = _query_server(ip, target, qtype, rd=0)
+        except Exception as e:
+            steps.append({"level": level, "server": name, "server_ip": ip,
+                          "result": "error", "detail": str(e)[:60]})
+            break
+        a = [r for r in msg["answers"] if r["type"] in ("A", "AAAA")]
+        cn = [r for r in msg["answers"] if r["type"] == "CNAME"]
+        if a:
+            steps.append({"level": level, "server": name, "server_ip": ip, "result": "answer",
+                          "records": [{"type": r["type"], "data": r["data"], "ttl": r["ttl"]} for r in a[:4]]})
+            break
+        if cn:
+            steps.append({"level": level, "server": name, "server_ip": ip, "result": "cname",
+                          "cname": cn[0]["data"]})
+            target = cn[0]["data"]
+            name, ip, level = ROOTS[0][0], ROOTS[0][1], "root"
+            continue
+        nslist = [r for r in msg["authority"] if r["type"] == "NS"]
+        glue = {r["name"].rstrip("."): r["data"] for r in msg["additional"] if r["type"] == "A"}
+        if not nslist:
+            steps.append({"level": level, "server": name, "server_ip": ip, "result": "no-referral"})
+            break
+        zone = nslist[0]["name"].rstrip(".")
+        chosen = nslist[0]["data"].rstrip(".")
+        steps.append({"level": level, "server": name, "server_ip": ip, "result": "referral",
+                      "zone": zone or "(root)",
+                      "nameservers": [n["data"].rstrip(".") for n in nslist[:4]], "next": chosen})
+        nxt = glue.get(chosen)
+        if not nxt:
+            try:
+                nxt = socket.gethostbyname(chosen)
+            except Exception:
+                nxt = None
+        if not nxt:
+            break
+        name, ip = chosen, nxt
+        level = "tld" if zone.count(".") == 0 else "authoritative"
+    return {"start": ROOTS[0][0], "hops": steps}
+
+
+# ---------- L6/L5 TLS handshake ladder (canonical for the negotiated version) ----------
+def build_handshake(version):
+    if version and "1.3" in version:
+        return {
+            "summary": "1 round-trip · certificate is encrypted",
+            "steps": [
+                {"from": "client", "msg": "ClientHello", "detail": "offers ciphers, key_share, SNI, ALPN", "enc": False},
+                {"from": "server", "msg": "ServerHello", "detail": "picks cipher + key_share", "enc": False},
+                {"from": "server", "msg": "EncryptedExtensions · Certificate · CertificateVerify · Finished", "detail": "server proves identity — encrypted", "enc": True},
+                {"from": "client", "msg": "Finished", "detail": "session established", "enc": True},
+            ],
+        }
+    return {
+        "summary": "2 round-trips · certificate sent in the clear",
+        "steps": [
+            {"from": "client", "msg": "ClientHello", "detail": "offers ciphers, SNI", "enc": False},
+            {"from": "server", "msg": "ServerHello", "detail": "picks cipher", "enc": False},
+            {"from": "server", "msg": "Certificate · ServerKeyExchange · ServerHelloDone", "detail": "cert in the clear", "enc": False},
+            {"from": "client", "msg": "ClientKeyExchange · ChangeCipherSpec · Finished", "detail": "switch to encrypted", "enc": False},
+            {"from": "server", "msg": "ChangeCipherSpec · Finished", "detail": "session established", "enc": False},
+        ],
+    }
+
+
 # ---------- L6/L5 cert helper ----------
 def _parse_cert(cert):
     if not cert:
@@ -193,6 +336,7 @@ def inspect(host, ip, family, port, scheme, path):
             "offered_count": len(offered),
             "offered_sample": offered[:12],
             "cert": _parse_cert(ss.getpeercert()),
+            "handshake": build_handshake(ss.version()),
         }
         stream = ss
 
@@ -229,6 +373,10 @@ def inspect(host, ip, family, port, scheme, path):
 def analyze(raw_url):
     scheme, host, port, path, ips = validate(raw_url)
     dns = dns_query(host)
+    try:
+        dns["trace"] = dns_trace(host)
+    except Exception as e:
+        dns["trace"] = {"error": str(e)[:80]}
     family, ip = ips[0]
     tcp, tls, http = inspect(host, ip, family, port, scheme, path)
     return {

@@ -42,6 +42,35 @@
     }).join('') + '</dl>';
   }
 
+  // recursive DNS walk (root -> TLD -> authoritative)
+  function traceHtml(tr){
+    if(!tr || tr.error || !tr.hops || !tr.hops.length) return '';
+    var rows = tr.hops.map(function(h){
+      var lvl = h.level==='authoritative' ? 'auth' : h.level;
+      var right;
+      if(h.result==='referral') right='referral → <b>'+esc(h.zone)+'</b> <span style="color:var(--mute)">('+esc(h.next)+')</span>';
+      else if(h.result==='answer') right='answer → <b>'+h.records.map(function(r){return esc(r.type+' '+r.data);}).join(', ')+'</b>';
+      else if(h.result==='cname') right='CNAME → '+esc(h.cname);
+      else right=esc(h.result)+' '+esc(h.detail||'');
+      return '<div class="trow"><span class="tlvl">'+esc(lvl)+'</span><span class="tsrv">'+esc(h.server)+'</span><span class="tarr">'+right+'</span></div>';
+    }).join('');
+    return '<div class="sub-h">recursive resolution — root → TLD → authoritative</div>'+
+      '<div class="trace">'+rows+'</div>'+
+      '<div class="explain" style="margin-top:8px">The resolver walks the tree: a <b>root</b> server points to the <b>.com</b> servers, which point to the domain’s <b>authoritative</b> server, which finally returns the address. Each hop is a real query.</div>';
+  }
+
+  // TLS handshake ladder
+  function ladderHtml(hs){
+    if(!hs || !hs.steps) return '';
+    var rows = hs.steps.map(function(s){
+      return '<div class="lrow '+(s.from==='client'?'l-c':'l-s')+'">'+
+        '<span class="lfrom">'+(s.from==='client'?'client →':'← server')+'</span>'+
+        '<span class="lmsg">'+esc(s.msg)+(s.enc?' <span class="enc">🔒</span>':'')+'</span>'+
+        '<span class="ldet">'+esc(s.detail)+'</span></div>';
+    }).join('');
+    return '<div class="sub-h">handshake — '+esc(hs.summary)+'</div><div class="ladder">'+rows+'</div>';
+  }
+
   // ---- build the 7 layers from the analysis ----
   function buildLayers(d){
     var https = d.scheme === 'https';
@@ -63,6 +92,7 @@
     var body7 =
       '<div class="sub-h">DNS &middot; name &rarr; address (UDP/53)</div>'+dnsRows+
       '<div class="hex">'+esc(dns.query_bytes)+'</div>'+
+      traceHtml(dns.trace)+
       '<div class="sub-h">HTTP request</div>'+kv([
         ['request line', '<b>GET '+esc(http.request.path)+' HTTP/1.1</b>', true],
         ['Host', http.request.host],
@@ -101,6 +131,7 @@
         ['ciphers offered', tls.offered_count + '  (ClientHello)'],
         ['cipher chosen', '<b>'+esc(chosen)+'</b>  (ServerHello)', true]
       ]) + '<div class="sub-h">negotiation — offered vs chosen</div><div class="chips">'+chips+'</div>'+
+        ladderHtml(tls.handshake)+
         '<div class="explain">The <b>handshake</b> opens the secure session: the client sends a <b>ClientHello</b> listing '+tls.offered_count+' ciphers and the SNI; the server replies <b>ServerHello</b> picking one. That agreement is the negotiation.</div>';
       L.push({n:5, name:'Session', proto:'TLS handshake', kind:'real', adds:'establishes the <b>session</b> (TLS handshake)', body:body5});
     } else {
