@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OSI Explorer — Vladyslav Taran</title>
+  <meta name="description" content="Enter a URL and see a real request dissected across the 7 OSI layers — DNS, TCP, TLS handshake and HTTP." />
+  <meta name="theme-color" content="#ece8df" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>try{var t=localStorage.getItem('vt-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+  <link rel="stylesheet" href="osi.css?v=1" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23ece8df'/><text x='6' y='74' font-size='58' font-family='monospace' font-weight='700' fill='%23151412'>osi</text></svg>" />
+</head>
+<body>
+  <header class="top">
+    <a class="back" href="/">&larr; vladyslav.taran</a>
+    <button class="theme-btn" data-theme-toggle aria-label="Switch color theme"><span class="tdot"></span><span class="tlabel">Dark</span></button>
+  </header>
+
+  <main class="wrap">
+    <div class="intro">
+      <p class="kicker"><span class="sig">//</span> Utility</p>
+      <h1>OSI Explorer</h1>
+      <p class="sub">Enter a URL and press <b>Run</b> — the server performs a real request and dissects it across the <b>7 OSI layers</b>: DNS resolution, the TCP connection, the TLS handshake &amp; certificate, and the HTTP exchange.</p>
+    </div>
+
+    <form class="bar" id="form">
+      <span class="scheme" id="scheme">https</span>
+      <input id="url" type="text" value="https://example.com" spellcheck="false" autocomplete="off"
+             placeholder="example.com  or  http://neverssl.com" />
+      <button type="submit" id="run">Run</button>
+    </form>
+
+    <div class="notice" id="notice" hidden></div>
+
+    <div class="summary" id="summary" hidden></div>
+    <div class="legend" id="legend" hidden>
+      <span class="tag real">real</span> captured/negotiated live
+      <span class="tag recon">reconstructed</span> built from the real connection
+      <span class="tag illus">illustrated</span> not sniffable on a cloud VM
+    </div>
+
+    <div class="layers" id="layers"></div>
+
+    <p class="foot">Runs server-side on chrome.net.ua · L1/L2 illustrated, L3–L7 from a real request · <a href="/">Back to portfolio</a></p>
+  </main>
+
+  <script src="osi.js?v=1"></script>
+</body>
+</html>

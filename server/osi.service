@@ -1,0 +1,20 @@
+[Unit]
+Description=OSI Explorer backend (chrome.net.ua/osi)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=OSI_PORT=8091
+ExecStart=/usr/bin/python3 /opt/osi/osi.py
+Restart=on-failure
+RestartSec=3
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
