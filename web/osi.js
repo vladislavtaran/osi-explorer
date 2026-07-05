@@ -24,7 +24,6 @@
   var form = document.getElementById('form');
   var input = document.getElementById('url');
   var runBtn = document.getElementById('run');
-  var schemeEl = document.getElementById('scheme');
   var notice = document.getElementById('notice');
   var summary = document.getElementById('summary');
   var legend = document.getElementById('legend');
@@ -61,9 +60,6 @@
     return out;
   }
 
-  function schemeOf(v){ v=v.trim().toLowerCase(); if(v.indexOf('http://')===0) return 'http'; if(v.indexOf('https://')===0) return 'https'; return 'https'; }
-  input.addEventListener('input', function(){ schemeEl.textContent = schemeOf(input.value); });
-  schemeEl.textContent = schemeOf(input.value);
 
   function kv(pairs){
     return '<dl class="kv">' + pairs.map(function(p){
@@ -271,5 +267,5 @@
 
   // shareable / deep-link: /osi/?url=https://example.com auto-runs
   var qp = new URLSearchParams(location.search).get('url');
-  if (qp){ input.value = qp; schemeEl.textContent = schemeOf(qp); send(); }
+  if (qp){ input.value = qp; send(); }
 })();

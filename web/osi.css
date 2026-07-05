@@ -44,7 +44,6 @@ a{color:inherit; text-decoration:none;}
 
 /* input bar */
 .bar{display:flex; align-items:stretch; gap:0; margin:26px 0 6px; border:1px solid var(--ink); background:var(--paper-2);}
-.scheme{font-family:var(--mono); font-size:.8rem; display:flex; align-items:center; padding:0 12px; color:var(--sig); border-right:1px solid var(--rule); background:var(--paper);}
 #url{flex:1; min-width:0; border:0; background:transparent; color:var(--ink); font-family:var(--mono); font-size:.98rem; padding:13px 14px;}
 #url:focus{outline:none;}
 #run{font-family:var(--mono); font-size:.9rem; font-weight:600; cursor:pointer; padding:0 26px; background:var(--ink); color:var(--paper); border:0; border-left:1px solid var(--ink);}
