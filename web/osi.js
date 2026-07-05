@@ -180,4 +180,8 @@
   }
 
   form.addEventListener('submit', function(e){ e.preventDefault(); send(); });
+
+  // shareable / deep-link: /osi/?url=https://example.com auto-runs
+  var qp = new URLSearchParams(location.search).get('url');
+  if (qp){ input.value = qp; schemeEl.textContent = schemeOf(qp); send(); }
 })();

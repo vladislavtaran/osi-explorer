@@ -4,7 +4,9 @@ Enter a URL, press **Run**, and see a **real** request dissected across the
 **7 OSI layers** — DNS resolution, the TCP connection, the TLS handshake &
 certificate, and the HTTP exchange.
 
-**Live demo:** https://chrome.net.ua/osi/
+**Live demo:** https://chrome.net.ua/osi/  ·  deep-link: `?url=https://example.com` auto-runs
+
+![OSI Explorer — a real URL request dissected across the 7 OSI layers](docs/screenshot.png)
 
 ## What it shows
 
