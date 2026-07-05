@@ -16,12 +16,14 @@ Stdlib only. SSRF-guarded: http/https + ports 80/443 only, public IPs only,
 and we connect to the exact validated IP (no DNS-rebinding window).
 """
 import os
+import re
 import ssl
 import json
 import socket
 import struct
 import random
 import ipaddress
+import subprocess
 from urllib.parse import urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -288,6 +290,61 @@ def build_handshake(version):
     }
 
 
+# ---------- L6/L5 real handshake bytes via `openssl s_client -msg` ----------
+_MSG_RE = re.compile(r"^(>>>|<<<) TLS[^,]*, Handshake \[length ([0-9a-fA-F]+)\], (\w+)")
+_HEX_RE = re.compile(r"^\s+([0-9a-fA-F ]+)$")
+_CHAIN_RE = re.compile(r"^\s*(\d+)\s+s:(.+)$")
+
+
+def openssl_handshake(host, ip, port):
+    """Capture the REAL TLS handshake messages (byte-for-byte) with openssl."""
+    try:
+        proc = subprocess.run(
+            ["openssl", "s_client", "-connect", "%s:%d" % (ip, port),
+             "-servername", host, "-msg"],
+            input=b"Q\n", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+    except Exception:
+        return {"available": False}
+    out = proc.stdout.decode("latin1", "replace")
+    lines = out.split("\n")
+    messages, cur, hexbuf = [], None, []
+
+    def flush():
+        if cur is not None:
+            cur["hex"] = "".join(hexbuf)[:96]     # first 48 bytes
+            messages.append(cur)
+
+    for ln in lines:
+        m = _MSG_RE.match(ln)
+        if m:
+            flush(); hexbuf = []
+            cur = {"dir": "client" if m.group(1) == ">>>" else "server",
+                   "name": m.group(3), "length": int(m.group(2), 16)}
+            continue
+        if cur is not None:
+            hm = _HEX_RE.match(ln)
+            if hm:
+                hexbuf.append(hm.group(1).replace(" ", ""))
+            else:
+                flush(); cur = None; hexbuf = []
+    flush()
+
+    chain, inchain = [], False
+    for ln in lines:
+        if ln.startswith("Certificate chain"):
+            inchain = True
+            continue
+        if inchain:
+            cs = _CHAIN_RE.match(ln)
+            if cs:
+                chain.append({"n": int(cs.group(1)), "subject": cs.group(2).strip()[:90]})
+            elif ln.startswith("---") or ln.startswith("Server certificate"):
+                inchain = False
+    if not messages:
+        return {"available": False}
+    return {"available": True, "messages": messages[:12], "chain": chain[:6]}
+
+
 # ---------- L6/L5 cert helper ----------
 def _parse_cert(cert):
     if not cert:
@@ -338,6 +395,10 @@ def inspect(host, ip, family, port, scheme, path):
             "cert": _parse_cert(ss.getpeercert()),
             "handshake": build_handshake(ss.version()),
         }
+        try:
+            tls["wire"] = openssl_handshake(host, ip, port)
+        except Exception:
+            tls["wire"] = {"available": False}
         stream = ss
 
     req = ("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\n"

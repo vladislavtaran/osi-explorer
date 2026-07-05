@@ -111,6 +111,7 @@ html[data-theme="dark"] #run{background:var(--sig); color:#0c0c0b;}
 .lfrom{color:var(--sig); font-weight:600; white-space:nowrap;}
 .lmsg{color:var(--ink); word-break:break-word;}
 .ldet{grid-column:2; color:var(--mute); font-size:.7rem;}
+.ldet.hexb{color:var(--mute); word-break:break-all; letter-spacing:.02em;}
 .enc{color:var(--real);}
 @media (max-width:560px){
   .trow{grid-template-columns:52px 1fr; }

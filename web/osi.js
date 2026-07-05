@@ -71,6 +71,30 @@
     return '<div class="sub-h">handshake — '+esc(hs.summary)+'</div><div class="ladder">'+rows+'</div>';
   }
 
+  // prefer REAL captured handshake bytes (openssl -msg) over the canonical ladder
+  function handshakeHtml(hs, wire){
+    if(!(wire && wire.available && wire.messages && wire.messages.length)) return ladderHtml(hs);
+    var rows = wire.messages.map(function(m){
+      var arrow = m.dir==='client' ? 'client →' : '← server';
+      return '<div class="lrow '+(m.dir==='client'?'l-c':'l-s')+'">'+
+        '<span class="lfrom">'+arrow+'</span>'+
+        '<span class="lmsg">'+esc(m.name)+' <span style="color:var(--mute)">('+m.length+' B)</span></span>'+
+        '<span class="ldet hexb">'+esc(m.hex)+'…</span></div>';
+    }).join('');
+    return '<div class="sub-h">handshake — real bytes captured with <code>openssl s_client -msg</code></div><div class="ladder">'+rows+'</div>';
+  }
+
+  // full certificate chain (leaf → root), from openssl
+  function chainHtml(wire){
+    if(!(wire && wire.available && wire.chain && wire.chain.length)) return '';
+    var n = wire.chain.length;
+    var rows = wire.chain.map(function(c){
+      var role = c.n===0 ? 'leaf' : (c.n===n-1 ? 'root' : 'intermediate');
+      return '<div class="lrow"><span class="lfrom">'+role+'</span><span class="lmsg">'+esc(c.subject)+'</span></div>';
+    }).join('');
+    return '<div class="sub-h">certificate chain — leaf → root</div><div class="ladder">'+rows+'</div>';
+  }
+
   // ---- build the 7 layers from the analysis ----
   function buildLayers(d){
     var https = d.scheme === 'https';
@@ -114,7 +138,7 @@
         ['cert issuer', (c.issuer_cn||'')+(c.issuer_org?' · '+c.issuer_org:'')],
         ['valid', (c.not_before||'?')+'  →  '+(c.not_after||'?')],
         ['SAN', (c.sans||[]).join(', ') + (c.san_count>((c.sans||[]).length)?' …':'')]
-      ]) + '<div class="explain">This layer <b>encrypts</b> the data and proves the server’s identity with an X.509 <b>certificate</b>, using the cipher agreed in the handshake.</div>';
+      ]) + chainHtml(tls.wire) + '<div class="explain">This layer <b>encrypts</b> the data and proves the server’s identity with an X.509 <b>certificate</b>, using the cipher agreed in the handshake.</div>';
       L.push({n:6, name:'Presentation', proto:'TLS', kind:'real', adds:'adds <b>encryption</b> + certificate (serialisation)', body:body6});
     } else {
       L.push({n:6, name:'Presentation', proto:'—', kind:'illus',
@@ -131,7 +155,7 @@
         ['ciphers offered', tls.offered_count + '  (ClientHello)'],
         ['cipher chosen', '<b>'+esc(chosen)+'</b>  (ServerHello)', true]
       ]) + '<div class="sub-h">negotiation — offered vs chosen</div><div class="chips">'+chips+'</div>'+
-        ladderHtml(tls.handshake)+
+        handshakeHtml(tls.handshake, tls.wire)+
         '<div class="explain">The <b>handshake</b> opens the secure session: the client sends a <b>ClientHello</b> listing '+tls.offered_count+' ciphers and the SNI; the server replies <b>ServerHello</b> picking one. That agreement is the negotiation.</div>';
       L.push({n:5, name:'Session', proto:'TLS handshake', kind:'real', adds:'establishes the <b>session</b> (TLS handshake)', body:body5});
     } else {
