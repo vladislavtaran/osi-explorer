@@ -93,6 +93,8 @@ html[data-theme="dark"] #run{background:var(--sig); color:#0c0c0b;}
 .kv dd b{color:var(--sig); font-weight:600;}
 .sub-h{font-family:var(--mono); font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:var(--sig); margin:14px 0 8px;}
 .hex{font-family:var(--mono); font-size:.72rem; color:var(--mute); word-break:break-all; line-height:1.5; background:var(--paper); border:1px solid var(--rule); padding:8px 10px; margin-top:8px;}
+.greet{font-family:var(--mono); font-size:.78rem; color:var(--ink); white-space:pre-wrap; word-break:break-word;
+  line-height:1.55; background:var(--paper); border:1px solid var(--rule); padding:9px 11px; margin-top:8px;}
 .explain{font-size:.86rem; color:var(--ink-2); margin-top:10px; line-height:1.5;}
 .explain::before{content:"› "; color:var(--sig);}
 .chips{display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;}

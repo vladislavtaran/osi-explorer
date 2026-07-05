@@ -2,23 +2,27 @@
 """
 OSI Explorer backend.
 
-Given a URL, it performs a REAL request and reports the per-layer detail:
+Given a URL, it performs a REAL connection and reports the per-layer detail:
   - L7 DNS  : real UDP DNS query/response (addresses + TTL)
   - L4/L3   : real TCP connection facts (src/dst IP + ports)
   - L6/L5   : real TLS handshake (version, negotiated cipher, certificate, SNI)
-  - L7 HTTP : real request + response (status + headers)
+  - L7 app  : the protocol exchange — HTTP request/response, the WebSocket 101
+              upgrade, the SSH version banner, or the FTP/SMTP/IMAP/POP3
+              server greeting (read-only — no commands are ever sent)
 
 L2/L1 are not capturable on a cloud VM — the frontend illustrates them.
 Lower-layer packet *bytes* are reconstructed by the frontend from these real
 facts (this is the "reconstructed" MVP, honestly labeled).
 
-Stdlib only. SSRF-guarded: http/https + ports 80/443 only, public IPs only,
-and we connect to the exact validated IP (no DNS-rebinding window).
+Stdlib only. SSRF-guarded: curated scheme + fixed port allow-list (see SCHEMES /
+ALLOWED_PORTS), public IPs only, read-only banners, and we connect to the exact
+validated IP (no DNS-rebinding window).
 """
 import os
 import re
 import ssl
 import json
+import base64
 import socket
 import struct
 import random
@@ -33,19 +37,49 @@ TIMEOUT = 8
 UA = "OSI-Explorer/1.0 (+https://chrome.net.ua/osi/)"
 
 
+# ---------- supported schemes (curated allow-list) ----------
+# scheme -> (default_port, implicit_tls_on_connect, L7 kind)
+#   kind: "http"  -> send an HTTP request, read the response
+#         "ws"    -> send an HTTP Upgrade request, read the 101 handshake
+#         "banner"-> read the server greeting on connect (read-only, no commands)
+#         "ssh"   -> read the SSH transport version string (pre-encryption)
+SCHEMES = {
+    "http":  (80,  False, "http"),
+    "https": (443, True,  "http"),
+    "ws":    (80,  False, "ws"),
+    "wss":   (443, True,  "ws"),
+    "ftp":   (21,  False, "banner"),
+    "ftps":  (990, True,  "banner"),
+    "smtp":  (25,  False, "banner"),
+    "smtps": (465, True,  "banner"),
+    "imap":  (143, False, "banner"),
+    "imaps": (993, True,  "banner"),
+    "pop3":  (110, False, "banner"),
+    "pop3s": (995, True,  "banner"),
+    "ssh":   (22,  False, "ssh"),
+    "sftp":  (22,  False, "ssh"),
+}
+# only these ports may ever be dialed (blocks using the server as a port scanner)
+ALLOWED_PORTS = {80, 443, 21, 990, 22, 25, 465, 587, 143, 993, 110, 995}
+
+
 # ---------- SSRF validation ----------
 def validate(raw_url):
     if "://" not in raw_url:
-        raw_url = "http://" + raw_url
+        raw_url = "https://" + raw_url
     u = urlparse(raw_url)
-    if u.scheme not in ("http", "https"):
-        raise ValueError("only http/https URLs are allowed")
+    scheme = (u.scheme or "").lower()
+    if scheme not in SCHEMES:
+        raise ValueError("unsupported scheme '%s' — allowed: %s"
+                         % (scheme, ", ".join(sorted(SCHEMES))))
     host = u.hostname
     if not host:
         raise ValueError("no hostname in URL")
-    port = u.port or (443 if u.scheme == "https" else 80)
-    if port not in (80, 443):
-        raise ValueError("only ports 80 and 443 are allowed")
+    default_port, implicit_tls, kind = SCHEMES[scheme]
+    port = u.port or default_port
+    if port not in ALLOWED_PORTS:
+        raise ValueError("port %d not allowed" % port)
+    cfg = {"tls": implicit_tls, "kind": kind}
     # resolve and require ALL results to be public
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
@@ -61,7 +95,7 @@ def validate(raw_url):
         ips.append((fam, ip))
     # prefer IPv4 for the actual connection (simpler to display)
     ips.sort(key=lambda x: 0 if x[0] == socket.AF_INET else 1)
-    return u.scheme, host, port, (u.path or "/"), ips
+    return scheme, host, port, (u.path or "/"), ips, cfg
 
 
 # ---------- L7 DNS: real UDP query to the system resolver ----------
@@ -370,7 +404,105 @@ def _parse_cert(cert):
 
 
 # ---------- L4/L3 + L6/L5 + L7: connect to the exact validated IP ----------
-def inspect(host, ip, family, port, scheme, path):
+def _parse_http_head(resp):
+    head = resp.split(b"\r\n\r\n", 1)[0].decode("latin1", "replace")
+    lines = head.split("\r\n")
+    status = lines[0] if lines else ""
+    headers = {}
+    for ln in lines[1:]:
+        if ":" in ln:
+            k, v = ln.split(":", 1)
+            headers[k.strip()] = v.strip()
+    return status, headers
+
+
+def do_http(stream, host, path):
+    req = ("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\n"
+           "Connection: close\r\n\r\n") % (path, host, UA)
+    stream.sendall(req.encode())
+    resp = b""
+    while b"\r\n\r\n" not in resp and len(resp) < 65536:
+        chunk = stream.recv(4096)
+        if not chunk:
+            break
+        resp += chunk
+    status, headers = _parse_http_head(resp)
+    return {
+        "type": "http",
+        "request": {"method": "GET", "path": path, "host": host,
+                    "headers": {"Host": host, "User-Agent": UA, "Accept": "*/*"}},
+        "status_line": status,
+        "response_headers": headers,
+    }
+
+
+def do_websocket(stream, host, path):
+    key = base64.b64encode(os.urandom(16)).decode()
+    req_headers = {
+        "Host": host, "Upgrade": "websocket", "Connection": "Upgrade",
+        "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13", "User-Agent": UA,
+    }
+    req = "GET %s HTTP/1.1\r\n" % path
+    req += "".join("%s: %s\r\n" % (k, v) for k, v in req_headers.items()) + "\r\n"
+    stream.sendall(req.encode())
+    resp = b""
+    while b"\r\n\r\n" not in resp and len(resp) < 65536:
+        chunk = stream.recv(4096)
+        if not chunk:
+            break
+        resp += chunk
+    status, headers = _parse_http_head(resp)
+    return {
+        "type": "ws",
+        "request": {"method": "GET", "path": path, "host": host, "headers": req_headers},
+        "status_line": status,
+        "response_headers": headers,
+        "upgraded": status.split(" ")[1:2] == ["101"],
+    }
+
+
+def do_banner(stream, scheme):
+    """Read the server greeting sent on connect. Read-only — no commands sent."""
+    stream.settimeout(5)
+    data = b""
+    try:
+        while len(data) < 4096:
+            chunk = stream.recv(1024)
+            if not chunk:
+                break
+            data += chunk
+            if b"\n" in data:
+                # SMTP may send a multi-line greeting (220-… continuation); keep reading
+                last = data.rstrip().split(b"\n")[-1]
+                if scheme.startswith("smtp") and last[3:4] == b"-":
+                    continue
+                break
+    except (socket.timeout, ssl.SSLError):
+        pass
+    text = data.decode("latin1", "replace")
+    lines = [ln.rstrip("\r")[:300] for ln in text.split("\n") if ln.strip()][:10]
+    return {"type": "banner", "protocol": scheme, "greeting": lines,
+            "raw": text.strip()[:600]}
+
+
+def do_ssh(stream):
+    """SSH servers send an unencrypted version string on connect (RFC 4253 §4.2)."""
+    stream.settimeout(5)
+    data = b""
+    try:
+        while b"\n" not in data and len(data) < 512:
+            chunk = stream.recv(256)
+            if not chunk:
+                break
+            data += chunk
+    except socket.timeout:
+        pass
+    ver = data.decode("latin1", "replace").strip()
+    soft = ver.split("-", 2)[2] if ver.count("-") >= 2 else ""
+    return {"type": "ssh", "server_version": ver[:200], "software": soft[:120]}
+
+
+def inspect(host, ip, family, port, scheme, path, cfg):
     sock = socket.socket(family, socket.SOCK_STREAM)
     sock.settimeout(TIMEOUT)
     sock.connect((ip, port))
@@ -379,7 +511,7 @@ def inspect(host, ip, family, port, scheme, path):
 
     tls = None
     stream = sock
-    if scheme == "https":
+    if cfg["tls"]:
         ctx = ssl.create_default_context()
         offered = [c["name"] for c in ctx.get_ciphers()]
         ss = ctx.wrap_socket(sock, server_hostname=host)
@@ -401,45 +533,33 @@ def inspect(host, ip, family, port, scheme, path):
             tls["wire"] = {"available": False}
         stream = ss
 
-    req = ("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\n"
-           "Connection: close\r\n\r\n") % (path, host, UA)
-    stream.sendall(req.encode())
-    resp = b""
-    while b"\r\n\r\n" not in resp and len(resp) < 65536:
-        chunk = stream.recv(4096)
-        if not chunk:
-            break
-        resp += chunk
-    head = resp.split(b"\r\n\r\n", 1)[0].decode("latin1", "replace")
-    lines = head.split("\r\n")
-    status = lines[0] if lines else ""
-    headers = {}
-    for ln in lines[1:]:
-        if ":" in ln:
-            k, v = ln.split(":", 1)
-            headers[k.strip()] = v.strip()
+    kind = cfg["kind"]
+    if kind == "http":
+        l7 = do_http(stream, host, path)
+    elif kind == "ws":
+        l7 = do_websocket(stream, host, path)
+    elif kind == "banner":
+        l7 = do_banner(stream, scheme)
+    elif kind == "ssh":
+        l7 = do_ssh(stream)
+    else:
+        l7 = {"type": "unknown"}
     try:
         stream.close()
     except Exception:
         pass
-    http = {
-        "request": {"method": "GET", "path": path, "host": host,
-                    "headers": {"Host": host, "User-Agent": UA, "Accept": "*/*"}},
-        "status_line": status,
-        "response_headers": headers,
-    }
-    return tcp, tls, http
+    return tcp, tls, l7
 
 
 def analyze(raw_url):
-    scheme, host, port, path, ips = validate(raw_url)
+    scheme, host, port, path, ips, cfg = validate(raw_url)
     dns = dns_query(host)
     try:
         dns["trace"] = dns_trace(host)
     except Exception as e:
         dns["trace"] = {"error": str(e)[:80]}
     family, ip = ips[0]
-    tcp, tls, http = inspect(host, ip, family, port, scheme, path)
+    tcp, tls, l7 = inspect(host, ip, family, port, scheme, path, cfg)
     return {
         "ok": True,
         "url": raw_url,
@@ -447,10 +567,12 @@ def analyze(raw_url):
         "host": host,
         "port": port,
         "path": path,
+        "kind": cfg["kind"],
+        "secure": cfg["tls"],
         "dns": dns,
         "tcp": tcp,
         "tls": tls,
-        "http": http,
+        "l7": l7,
     }
 
 

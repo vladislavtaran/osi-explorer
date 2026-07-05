@@ -41,8 +41,15 @@
     'TTL':'Time_to_live','MAC address':'MAC_address','certificate':'Public_key_certificate',
     'cipher suite':'Cipher_suite','handshake':'Transport_Layer_Security#TLS_handshake',
     'ClientHello':'Transport_Layer_Security#TLS_handshake','ServerHello':'Transport_Layer_Security#TLS_handshake',
-    'A record':'List_of_DNS_record_types','root server':'Root_name_server'
+    'A record':'List_of_DNS_record_types','root server':'Root_name_server',
+    'FTP':'File_Transfer_Protocol','SMTP':'Simple_Mail_Transfer_Protocol',
+    'IMAP':'Internet_Message_Access_Protocol','POP3':'Post_Office_Protocol',
+    'SSH':'Secure_Shell','WebSocket':'WebSocket'
   };
+  var PROTO_LABEL = {http:'HTTP',https:'HTTP',ws:'WebSocket',wss:'WebSocket',
+    ftp:'FTP',ftps:'FTP',smtp:'SMTP',smtps:'SMTP',imap:'IMAP',imaps:'IMAP',
+    pop3:'POP3',pop3s:'POP3',ssh:'SSH',sftp:'SSH'};
+  function protoName(scheme){ return PROTO_LABEL[scheme] || String(scheme).toUpperCase(); }
   function wiki(slug){ return 'https://en.wikipedia.org/wiki/'+slug; }
   function ext(href,label,title){ return '<a href="'+href+'" target="_blank" rel="noopener"'+(title?' title="'+esc(title)+'"':'')+'>'+label+'</a>'; }
   function tlink(term,label){ var s=TERMS[term]; label=(label==null?term:label); return s?ext(wiki(s),esc(label),term+' — reference'):esc(label); }
@@ -54,7 +61,7 @@
   // linkify protocol names in a proto label (DNS · HTTP · TLS · TCP · IP · Ethernet)
   function protoHtml(p){
     var out = esc(p);
-    ['DNS','HTTP','TLS','TCP','IP','UDP','Ethernet'].forEach(function(t){
+    ['WebSocket','DNS','HTTP','TLS','TCP','UDP','IP','Ethernet','FTP','SMTP','IMAP','POP3','SSH'].forEach(function(t){
       out = out.replace(new RegExp('\\b'+t+'\\b'), ext(wiki(TERMS[t]), t, t+' — reference'));
     });
     return out;
@@ -120,41 +127,90 @@
     return '<div class="sub-h">certificate chain — leaf → root</div><div class="ladder">'+rows+'</div>';
   }
 
+  function greetBlock(text){ return '<div class="greet">'+esc(text)+'</div>'; }
+
+  // L7 application content, by protocol kind
+  function renderL7(d){
+    var l = d.l7, name = protoName(d.scheme);
+    if(l.type==='http'){
+      var rows = [['status', '<b>'+esc(l.status_line)+'</b>', true]];
+      ['Server','Content-Type','Content-Length','Location','Date'].forEach(function(h){
+        if(l.response_headers[h]) rows.push([h, l.response_headers[h]]);
+      });
+      return { adds:'adds the <b>real data</b> — the DNS query and the HTTP request/response',
+        body:'<div class="sub-h">HTTP request</div>'+kv([
+            ['request line', '<b>GET '+esc(l.request.path)+' HTTP/1.1</b>', true],
+            ['Host', l.request.host],
+            ['User-Agent', l.request.headers['User-Agent']]
+          ])+
+          '<div class="sub-h">HTTP response</div>'+kv(rows)+
+          '<div class="explain">The address-bar name is turned into an IP by <b>'+tlink('DNS')+'</b>, then <b>'+tlink('HTTP')+'</b> carries the actual request/response.'+
+            (d.secure?' Over HTTPS the body is encrypted on the wire — shown here from our own client.':'')+'</div>' };
+    }
+    if(l.type==='ws'){
+      var wrows = [['status', '<b>'+esc(l.status_line)+'</b>'+(l.upgraded?'  ✓ upgraded':''), true]];
+      ['Upgrade','Connection','Sec-WebSocket-Accept'].forEach(function(h){
+        if(l.response_headers[h]) wrows.push([h, l.response_headers[h]]);
+      });
+      return { adds:'the <b>'+tlink('WebSocket')+'</b> upgrade handshake',
+        body:'<div class="sub-h">upgrade request</div>'+kv([
+            ['request line', '<b>GET '+esc(l.request.path)+' HTTP/1.1</b>', true],
+            ['Upgrade', l.request.headers['Upgrade']],
+            ['Connection', l.request.headers['Connection']],
+            ['Sec-WebSocket-Key', l.request.headers['Sec-WebSocket-Key']]
+          ])+
+          '<div class="sub-h">server response</div>'+kv(wrows)+
+          '<div class="explain">A <b>'+tlink('WebSocket')+'</b> starts as an HTTP request carrying <b>Upgrade: websocket</b>. A <b>101 Switching Protocols</b> reply means this same TCP connection is now a full-duplex WebSocket.</div>' };
+    }
+    if(l.type==='banner'){
+      return { adds:'the <b>'+tlink(name)+'</b> server greeting (read-only)',
+        body:'<div class="sub-h">'+esc(name)+' server greeting — sent on connect</div>'+
+          greetBlock((l.greeting||[]).join('\n') || l.raw || '(no greeting received)')+
+          '<div class="explain">On connect, an <b>'+tlink(name)+'</b> server sends a greeting/banner before any command. We only <b>read</b> it — no login or commands are sent'+(d.secure?', and here it arrives inside the '+tlink('TLS')+' tunnel':'')+'.</div>' };
+    }
+    if(l.type==='ssh'){
+      return { adds:'the <b>'+tlink('SSH')+'</b> version banner (pre-encryption)',
+        body:'<div class="sub-h">SSH version exchange</div>'+kv([
+            ['server version', '<b>'+esc(l.server_version)+'</b>', true],
+            ['software', l.software || '—']
+          ])+
+          '<div class="explain">An <b>'+tlink('SSH')+'</b> server announces its protocol and software version in cleartext (RFC 4253) before the encrypted key exchange begins. That banner is what we capture.</div>' };
+    }
+    return { adds:'application data', body:'' };
+  }
+
+  function l7Summary(d){
+    var l = d.l7;
+    if(l.type==='http'||l.type==='ws') return (l.status_line||'').replace('HTTP/1.1 ','');
+    if(l.type==='banner') return (l.greeting&&l.greeting[0]) || '(no banner)';
+    if(l.type==='ssh') return l.server_version || '(no banner)';
+    return '';
+  }
+
   // ---- build the 7 layers from the analysis ----
   function buildLayers(d){
-    var https = d.scheme === 'https';
+    var secure = !!d.tls;
     var tls = d.tls;
     var L = [];
 
     // L7 Application ---------------------------------------------------
-    var dns = d.dns, http = d.http;
+    var dns = d.dns;
     var dnsRows = kv([
       ['resolver', dns.resolver],
       ['txn id', '0x'+Number(dns.transaction_id).toString(16)],
       ['question', dns.question.name + '  (A, IN)'],
       ['answers', dns.answers.map(function(a){ return a.type+' '+a.data+'  <span style="color:var(--mute)">ttl '+a.ttl+'s</span>'; }).join('<br>'), true]
     ]);
-    var respRows = [['status', '<b>'+esc(http.status_line)+'</b>', true]];
-    ['Server','Content-Type','Content-Length','Location','Date'].forEach(function(h){
-      if(http.response_headers[h]) respRows.push([h, http.response_headers[h]]);
-    });
+    var app = renderL7(d);
     var body7 =
       '<div class="sub-h">DNS &middot; name &rarr; address (UDP/53)</div>'+dnsRows+
       '<div class="hex">'+esc(dns.query_bytes)+'</div>'+
-      traceHtml(dns.trace)+
-      '<div class="sub-h">HTTP request</div>'+kv([
-        ['request line', '<b>GET '+esc(http.request.path)+' HTTP/1.1</b>', true],
-        ['Host', http.request.host],
-        ['User-Agent', http.request.headers['User-Agent']]
-      ])+
-      '<div class="sub-h">HTTP response</div>'+kv(respRows)+
-      '<div class="explain">The address bar name is turned into an IP by <b>DNS</b>, then <b>HTTP</b> carries the actual request/response.'+
-        (https?' Over HTTPS the body is encrypted on the wire — shown here from our own client.':'')+'</div>';
-    L.push({n:7, name:'Application', proto:'DNS · HTTP', kind:'real', open:true,
-      adds:'adds the <b>real data</b> — the DNS query and the HTTP request/response', body:body7});
+      traceHtml(dns.trace)+ app.body;
+    L.push({n:7, name:'Application', proto:'DNS · '+protoName(d.scheme), kind:'real', open:true,
+      adds:app.adds, body:body7});
 
     // L6 Presentation --------------------------------------------------
-    if(https && tls){
+    if(secure && tls){
       var c = tls.cert || {};
       var body6 = kv([
         ['TLS version', '<b>'+esc(tls.version)+'</b>', true],
@@ -165,13 +221,18 @@
         ['SAN', (c.sans||[]).join(', ') + (c.san_count>((c.sans||[]).length)?' …':'')]
       ]) + chainHtml(tls.wire) + '<div class="explain">This layer <b>encrypts</b> the data and proves the server’s identity with an X.509 <b>'+tlink('certificate','certificate')+'</b>, using the cipher agreed in the '+tlink('handshake','handshake')+'.</div>';
       L.push({n:6, name:'Presentation', proto:'TLS', kind:'real', adds:'adds <b>encryption</b> + certificate (serialisation)', body:body6});
+    } else if(d.kind==='ssh'){
+      L.push({n:6, name:'Presentation', proto:'SSH transport', kind:'illus',
+        adds:'SSH brings its <b>own</b> encryption (not TLS)',
+        body:'<div class="explain"><b>'+tlink('SSH')+'</b> encrypts with its own transport layer — a key exchange right after the version banner — rather than TLS. We capture only the cleartext version string that precedes it.</div>'});
     } else {
       L.push({n:6, name:'Presentation', proto:'—', kind:'illus',
-        adds:'no TLS on plain HTTP', body:'<div class="explain">This is a plain <b>http://</b> request, so there is no encryption layer — everything travels in <b>cleartext</b>. That is exactly why HTTPS exists.</div>'});
+        adds:'no TLS on this cleartext connection',
+        body:'<div class="explain">This is a plain <b>'+esc(d.scheme)+'://</b> connection, so there is no encryption layer — everything travels in <b>cleartext</b>. The <b>'+esc(d.scheme)+'s</b> variant would add '+tlink('TLS')+' here.</div>'});
     }
 
     // L5 Session -------------------------------------------------------
-    if(https && tls){
+    if(secure && tls){
       var chosen = tls.cipher;
       var chips = (tls.offered_sample||[]).map(function(c){
         var href = /^TLS_/.test(c) ? 'https://ciphersuite.info/cs/'+encodeURIComponent(c)+'/' : wiki('Cipher_suite');
@@ -186,9 +247,13 @@
         handshakeHtml(tls.handshake, tls.wire)+
         '<div class="explain">The '+tlink('handshake','handshake')+' opens the secure session: the client sends a '+tlink('ClientHello','ClientHello')+' listing '+tls.offered_count+' ciphers and the '+tlink('SNI','SNI')+'; the server replies '+tlink('ServerHello','ServerHello')+' picking one. That agreement is the negotiation.</div>';
       L.push({n:5, name:'Session', proto:'TLS handshake', kind:'real', adds:'establishes the <b>session</b> (TLS handshake)', body:body5});
+    } else if(d.kind==='ssh'){
+      L.push({n:5, name:'Session', proto:'SSH key exchange', kind:'recon',
+        adds:'SSH opens its own encrypted session',
+        body:'<div class="explain">After the version exchange, <b>'+tlink('SSH')+'</b> runs its own key exchange to open an encrypted session over this <b>'+tlink('TCP')+'</b> connection.</div>'});
     } else {
       L.push({n:5, name:'Session', proto:'TCP connection', kind:'recon',
-        adds:'the TCP connection acts as the session', body:'<div class="explain">With no TLS, the "session" is just the open <b>TCP connection</b> between the two sockets.</div>'});
+        adds:'the TCP connection acts as the session', body:'<div class="explain">With no TLS, the "session" is just the open <b>'+tlink('TCP')+'</b> connection between the two sockets.</div>'});
     }
 
     // L4 Transport -----------------------------------------------------
@@ -196,7 +261,7 @@
     var body4 = kv([
       ['protocol', 'TCP'],
       ['source port', '<b>'+tcp.src_port+'</b> (ephemeral)', true],
-      ['dest port', '<b>'+tcp.dst_port+'</b> ('+(https?'https':'http')+')', true],
+      ['dest port', '<b>'+tcp.dst_port+'</b> ('+esc(d.scheme)+')', true],
       ['handshake', 'SYN → SYN,ACK → ACK']
     ]) + '<div class="explain">TCP adds <b>ports</b> (which app the data belongs to) and reliable, ordered delivery via the 3-way <b>handshake</b>, sequence and ACK numbers. <span style="color:var(--recon)">The individual handshake packets/seq numbers are reconstructed here, not sniffed.</span></div>';
     L.push({n:4, name:'Transport', proto:'TCP', kind:'recon', adds:'adds <b>ports</b> + reliable delivery (TCP header)', body:body4});
@@ -228,7 +293,7 @@
       '<span>'+esc(d.scheme)+'://'+esc(d.host)+'</span>'+
       '<span>&rarr; <b>'+esc(d.tcp.dst_ip)+'</b>:'+d.tcp.dst_port+'</span>'+
       (d.tls?'<span>TLS <b>'+esc(d.tls.version.replace('TLSv',''))+'</b></span>':'<span>no TLS</span>')+
-      '<span>'+esc((d.http.status_line||'').replace('HTTP/1.1 ',''))+'</span>';
+      '<span>'+esc(l7Summary(d))+'</span>';
 
     var layers = buildLayers(d);
     layersEl.innerHTML = layers.map(function(l){

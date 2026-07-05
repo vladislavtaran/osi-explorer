@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script>try{var t=localStorage.getItem('vt-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-  <link rel="stylesheet" href="osi.css?v=1" />
+  <link rel="stylesheet" href="osi.css?v=2" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23ece8df'/><text x='6' y='74' font-size='58' font-family='monospace' font-weight='700' fill='%23151412'>osi</text></svg>" />
 </head>
 <body>
@@ -23,12 +23,12 @@
     <div class="intro">
       <p class="kicker"><span class="sig">//</span> Utility</p>
       <h1>OSI Explorer</h1>
-      <p class="sub">Enter a URL and press <b>Run</b> — the server performs a real request and dissects it across the 7 layers of the <b><a href="https://en.wikipedia.org/wiki/OSI_model" target="_blank" rel="noopener">OSI&nbsp;model</a></b> (Open Systems Interconnection): DNS resolution, the TCP connection, the TLS handshake &amp; certificate, and the HTTP exchange.</p>
+      <p class="sub">Enter a URL and press <b>Run</b> — the server performs a real connection and dissects it across the 7 layers of the <b><a href="https://en.wikipedia.org/wiki/OSI_model" target="_blank" rel="noopener">OSI&nbsp;model</a></b> (Open Systems Interconnection): DNS resolution, the TCP connection, the TLS handshake &amp; certificate, and the application exchange. Works for <b>HTTP(S)</b>, <b>FTP</b>, <b>SMTP</b>, <b>IMAP</b>, <b>POP3</b>, <b>SSH</b> and <b>WebSocket</b> — same lower layers, a different protocol on top.</p>
     </div>
 
     <form class="bar" id="form">
       <input id="url" type="text" value="https://example.com" spellcheck="false" autocomplete="off"
-             placeholder="https://example.com  or  http://neverssl.com" />
+             placeholder="https://example.com · ssh://github.com · imaps://imap.gmail.com · ftp://ftp.gnu.org" />
       <button type="submit" id="run">Run</button>
     </form>
 
@@ -46,6 +46,6 @@
     <p class="foot">Runs server-side on chrome.net.ua · L1/L2 illustrated, L3–L7 from a real request · <a href="/">Back to portfolio</a></p>
   </main>
 
-  <script src="osi.js?v=1"></script>
+  <script src="osi.js?v=2"></script>
 </body>
 </html>
