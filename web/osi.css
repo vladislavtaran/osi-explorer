@@ -72,7 +72,12 @@ html[data-theme="dark"] #run{background:var(--sig); color:#0c0c0b;}
 .lnum{font-family:var(--mono); font-size:.9rem; font-weight:600; color:var(--paper); background:var(--sig); padding:2px 8px; line-height:1.4; flex:0 0 auto;}
 .lname{font-family:var(--sans); font-weight:600; color:var(--ink); font-size:1.02rem;}
 .lproto{font-family:var(--mono); font-size:.76rem; color:var(--mute); margin-left:2px;}
-.lhead .tag{margin-left:auto;}
+.lproto a{color:var(--mute); border-bottom:1px dotted var(--rule);}
+.lproto a:hover{color:var(--sig); border-color:var(--sig);}
+.ldoc{margin-left:auto; flex:0 0 auto;}
+.ldoc a{font-family:var(--mono); font-size:.66rem; color:var(--mute); border-bottom:1px dotted transparent; white-space:nowrap;}
+.ldoc a:hover{color:var(--sig); border-color:var(--sig);}
+.lhead .tag{margin-left:10px;}
 .lchev{font-family:var(--mono); color:var(--mute); flex:0 0 auto; transition:transform .2s;}
 .layer.open .lchev{transform:rotate(90deg);}
 .lbody{padding:0 14px 14px; display:none;}
@@ -90,8 +95,14 @@ html[data-theme="dark"] #run{background:var(--sig); color:#0c0c0b;}
 .explain{font-size:.86rem; color:var(--ink-2); margin-top:10px; line-height:1.5;}
 .explain::before{content:"› "; color:var(--sig);}
 .chips{display:flex; flex-wrap:wrap; gap:5px; margin-top:6px;}
-.chip{font-family:var(--mono); font-size:.72rem; color:var(--ink-2); border:1px solid var(--rule); padding:2px 8px; background:var(--paper);}
+.chip{font-family:var(--mono); font-size:.72rem; color:var(--ink-2); border:1px solid var(--rule); padding:2px 8px; background:var(--paper); text-decoration:none; display:inline-block;}
+.chip:hover{border-color:var(--sig); color:var(--sig);}
 .chip.on{border-color:var(--sig); color:var(--sig); font-weight:600;}
+/* terminology links inside layer bodies */
+.lbody .kv dd a, .lbody .explain a, .lbody .sub-h a{color:inherit; border-bottom:1px dotted currentColor;}
+.lbody .kv dd a:hover, .lbody .explain a:hover, .lbody .sub-h a:hover{color:var(--sig); border-color:var(--sig);}
+.lbody .kv dt a{color:var(--mute); border-bottom:1px dotted var(--rule);}
+.lbody .kv dt a:hover{color:var(--sig); border-color:var(--sig);}
 
 /* recursive DNS trace */
 .trace{margin-top:6px; border:1px solid var(--rule); background:var(--paper);}

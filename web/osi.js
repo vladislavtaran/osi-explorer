@@ -32,13 +32,42 @@
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+  // reference links — each layer + key protocol terminology
+  var DOCS = {1:'Physical_layer',2:'Data_link_layer',3:'Network_layer',4:'Transport_layer',
+              5:'Session_layer',6:'Presentation_layer',7:'Application_layer'};
+  var TERMS = {
+    'DNS':'Domain_Name_System','HTTP':'HTTP','TLS':'Transport_Layer_Security',
+    'TCP':'Transmission_Control_Protocol','UDP':'User_Datagram_Protocol','IP':'Internet_Protocol',
+    'Ethernet':'Ethernet','SNI':'Server_Name_Indication','ALPN':'Application-Layer_Protocol_Negotiation',
+    'TTL':'Time_to_live','MAC address':'MAC_address','certificate':'Public_key_certificate',
+    'cipher suite':'Cipher_suite','handshake':'Transport_Layer_Security#TLS_handshake',
+    'ClientHello':'Transport_Layer_Security#TLS_handshake','ServerHello':'Transport_Layer_Security#TLS_handshake',
+    'A record':'List_of_DNS_record_types','root server':'Root_name_server'
+  };
+  function wiki(slug){ return 'https://en.wikipedia.org/wiki/'+slug; }
+  function ext(href,label,title){ return '<a href="'+href+'" target="_blank" rel="noopener"'+(title?' title="'+esc(title)+'"':'')+'>'+label+'</a>'; }
+  function tlink(term,label){ var s=TERMS[term]; label=(label==null?term:label); return s?ext(wiki(s),esc(label),term+' — reference'):esc(label); }
+  function cipherLink(name){
+    if(!name) return '';
+    var u = /^TLS_/.test(name) ? 'https://ciphersuite.info/cs/'+encodeURIComponent(name)+'/' : wiki('Cipher_suite');
+    return ext(u, esc(name), 'cipher suite — reference');
+  }
+  // linkify protocol names in a proto label (DNS · HTTP · TLS · TCP · IP · Ethernet)
+  function protoHtml(p){
+    var out = esc(p);
+    ['DNS','HTTP','TLS','TCP','IP','UDP','Ethernet'].forEach(function(t){
+      out = out.replace(new RegExp('\\b'+t+'\\b'), ext(wiki(TERMS[t]), t, t+' — reference'));
+    });
+    return out;
+  }
+
   function schemeOf(v){ v=v.trim().toLowerCase(); if(v.indexOf('http://')===0) return 'http'; if(v.indexOf('https://')===0) return 'https'; return 'https'; }
   input.addEventListener('input', function(){ schemeEl.textContent = schemeOf(input.value); });
   schemeEl.textContent = schemeOf(input.value);
 
   function kv(pairs){
     return '<dl class="kv">' + pairs.map(function(p){
-      return '<dt>'+esc(p[0])+'</dt><dd>'+(p[2]?p[1]:esc(p[1]))+'</dd>';
+      return '<dt>'+(p[3]?p[0]:esc(p[0]))+'</dt><dd>'+(p[2]?p[1]:esc(p[1]))+'</dd>';
     }).join('') + '</dl>';
   }
 
@@ -133,12 +162,12 @@
       var c = tls.cert || {};
       var body6 = kv([
         ['TLS version', '<b>'+esc(tls.version)+'</b>', true],
-        ['cipher', '<b>'+esc(tls.cipher)+'</b> ('+tls.bits+'-bit)', true],
+        ['cipher', '<b>'+cipherLink(tls.cipher)+'</b> ('+tls.bits+'-bit)', true],
         ['cert subject', c.subject_cn],
         ['cert issuer', (c.issuer_cn||'')+(c.issuer_org?' · '+c.issuer_org:'')],
         ['valid', (c.not_before||'?')+'  →  '+(c.not_after||'?')],
         ['SAN', (c.sans||[]).join(', ') + (c.san_count>((c.sans||[]).length)?' …':'')]
-      ]) + chainHtml(tls.wire) + '<div class="explain">This layer <b>encrypts</b> the data and proves the server’s identity with an X.509 <b>certificate</b>, using the cipher agreed in the handshake.</div>';
+      ]) + chainHtml(tls.wire) + '<div class="explain">This layer <b>encrypts</b> the data and proves the server’s identity with an X.509 <b>'+tlink('certificate','certificate')+'</b>, using the cipher agreed in the '+tlink('handshake','handshake')+'.</div>';
       L.push({n:6, name:'Presentation', proto:'TLS', kind:'real', adds:'adds <b>encryption</b> + certificate (serialisation)', body:body6});
     } else {
       L.push({n:6, name:'Presentation', proto:'—', kind:'illus',
@@ -148,15 +177,18 @@
     // L5 Session -------------------------------------------------------
     if(https && tls){
       var chosen = tls.cipher;
-      var chips = (tls.offered_sample||[]).map(function(c){ return '<span class="chip'+(c===chosen?' on':'')+'">'+esc(c)+'</span>'; }).join('');
+      var chips = (tls.offered_sample||[]).map(function(c){
+        var href = /^TLS_/.test(c) ? 'https://ciphersuite.info/cs/'+encodeURIComponent(c)+'/' : wiki('Cipher_suite');
+        return '<a class="chip'+(c===chosen?' on':'')+'" href="'+href+'" target="_blank" rel="noopener" title="cipher suite — reference">'+esc(c)+'</a>';
+      }).join('');
       var body5 = kv([
-        ['SNI', '<b>'+esc(tls.sni)+'</b>', true],
-        ['ALPN', tls.alpn || '—'],
-        ['ciphers offered', tls.offered_count + '  (ClientHello)'],
-        ['cipher chosen', '<b>'+esc(chosen)+'</b>  (ServerHello)', true]
+        [tlink('SNI','SNI'), '<b>'+esc(tls.sni)+'</b>', true, true],
+        [tlink('ALPN','ALPN'), tls.alpn || '—', false, true],
+        ['ciphers offered', tls.offered_count + '  ('+tlink('ClientHello','ClientHello')+')', true],
+        ['cipher chosen', '<b>'+cipherLink(chosen)+'</b>  ('+tlink('ServerHello','ServerHello')+')', true]
       ]) + '<div class="sub-h">negotiation — offered vs chosen</div><div class="chips">'+chips+'</div>'+
         handshakeHtml(tls.handshake, tls.wire)+
-        '<div class="explain">The <b>handshake</b> opens the secure session: the client sends a <b>ClientHello</b> listing '+tls.offered_count+' ciphers and the SNI; the server replies <b>ServerHello</b> picking one. That agreement is the negotiation.</div>';
+        '<div class="explain">The '+tlink('handshake','handshake')+' opens the secure session: the client sends a '+tlink('ClientHello','ClientHello')+' listing '+tls.offered_count+' ciphers and the '+tlink('SNI','SNI')+'; the server replies '+tlink('ServerHello','ServerHello')+' picking one. That agreement is the negotiation.</div>';
       L.push({n:5, name:'Session', proto:'TLS handshake', kind:'real', adds:'establishes the <b>session</b> (TLS handshake)', body:body5});
     } else {
       L.push({n:5, name:'Session', proto:'TCP connection', kind:'recon',
@@ -207,14 +239,15 @@
       var tag = l.kind==='real'?'<span class="tag real">real</span>':
                 l.kind==='recon'?'<span class="tag recon">reconstructed</span>':
                 '<span class="tag illus">illustrated</span>';
+      var doc = ext(wiki(DOCS[l.n]), 'what’s this? ↗', 'What is the '+l.name+' layer?');
       return '<div class="layer on-'+l.kind+(l.open?' open':'')+'">'+
         '<div class="lhead"><span class="lnum">L'+l.n+'</span>'+
-          '<span class="lname">'+l.name+'</span><span class="lproto">'+l.proto+'</span>'+
-          tag+'<span class="lchev">▸</span></div>'+
+          '<span class="lname">'+l.name+'</span><span class="lproto">'+protoHtml(l.proto)+'</span>'+
+          '<span class="ldoc">'+doc+'</span>'+tag+'<span class="lchev">▸</span></div>'+
         '<div class="lbody"><div class="ladds">'+l.adds+'</div>'+l.body+'</div></div>';
     }).join('');
     layersEl.querySelectorAll('.lhead').forEach(function(h){
-      h.addEventListener('click', function(){ h.parentNode.classList.toggle('open'); });
+      h.addEventListener('click', function(e){ if(e.target.closest('a')) return; h.parentNode.classList.toggle('open'); });
     });
   }
 

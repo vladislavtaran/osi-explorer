@@ -23,6 +23,11 @@ plain-English explanation, and an honesty badge:
 | **L2 Data Link** | MAC framing / first hop | ⚪ **illustrated** |
 | **L1 Physical** | bits on the medium | ⚪ **illustrated** |
 
+Every layer header links to its **Wikipedia article** ("what's this?"), and key
+terminology is clickable — protocols (TLS, TCP, IP, DNS…) to Wikipedia, and
+cipher suites (e.g. `TLS_AES_256_GCM_SHA384`) to
+[ciphersuite.info](https://ciphersuite.info).
+
 **Honest by design:** a browser can't sniff L1–L4 off the wire, so the backend
 performs a real request and reports the layers it genuinely can (L3–L7). Lower
 layers are *reconstructed* from the real connection or *illustrated*, and
